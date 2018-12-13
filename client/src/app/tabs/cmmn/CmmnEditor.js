@@ -23,6 +23,8 @@ import getCmmnWindowMenu from './getCmmnWindowMenu';
 
 import generateImage from '../../util/generateImage';
 
+const EXPORT_AS = [ 'svg', 'png' ];
+
 
 export class CmmnEditor extends CachedComponent {
 
@@ -38,9 +40,7 @@ export class CmmnEditor extends CachedComponent {
   componentDidMount() {
     this._isMounted = true;
 
-    const {
-      modeler
-    } = this.getCached();
+    const modeler = this.getModeler();
 
     this.listen('on');
 
@@ -57,9 +57,7 @@ export class CmmnEditor extends CachedComponent {
   componentWillUnmount() {
     this._isMounted = false;
 
-    const {
-      modeler
-    } = this.getCached();
+    const modeler = this.getModeler();
 
     this.listen('off');
 
@@ -68,6 +66,16 @@ export class CmmnEditor extends CachedComponent {
     const propertiesPanel = modeler.get('propertiesPanel');
 
     propertiesPanel.detach();
+  }
+
+  componentDidUpdate(prevProps) {
+    if (!isImporting(this.state) && isXMLChange(prevProps.xml, this.props.xml)) {
+      this.checkImport();
+    }
+
+    if (isChachedStateChange(prevProps, this.props)) {
+      this.handleChanged();
+    }
   }
 
   ifMounted = (fn) => {
@@ -79,9 +87,7 @@ export class CmmnEditor extends CachedComponent {
   }
 
   listen(fn) {
-    const {
-      modeler
-    } = this.getCached();
+    const modeler = this.getModeler();
 
     [
       'import.done',
@@ -96,32 +102,20 @@ export class CmmnEditor extends CachedComponent {
     modeler[fn]('error', 1500, this.handleError);
   }
 
-  componentDidUpdate() {
-    if (!this.state.importing) {
-      this.checkImport();
-    }
-  }
-
   undo = () => {
-    const {
-      modeler
-    } = this.getCached();
+    const modeler = this.getModeler();
 
     modeler.get('commandStack').undo();
   }
 
   redo = () => {
-    const {
-      modeler
-    } = this.getCached();
+    const modeler = this.getModeler();
 
     modeler.get('commandStack').redo();
   }
 
   align = (type) => {
-    const {
-      modeler
-    } = this.getCached();
+    const modeler = this.getModeler();
 
     const selection = modeler.get('selection').get();
 
@@ -146,14 +140,19 @@ export class CmmnEditor extends CachedComponent {
       xml
     } = this.props;
 
-    const {
-      modeler
-    } = this.getCached();
+    const modeler = this.getModeler();
+
+    const commandStack = modeler.get('commandStack');
+
+    const stackIdx = commandStack._stackIdx;
 
     onImport(error, warnings);
 
     if (!error) {
-      modeler.lastXML = xml;
+      this.setCached({
+        lastXML: xml,
+        stackIdx
+      });
 
       this.setState({
         importing: false
@@ -161,14 +160,14 @@ export class CmmnEditor extends CachedComponent {
     }
   }
 
-  handleChanged = (event) => {
-    const {
-      modeler
-    } = this.getCached();
+  handleChanged = () => {
+    const modeler = this.getModeler();
 
     const {
       onChanged
     } = this.props;
+
+    const dirty = this.checkDirty();
 
     const commandStack = modeler.get('commandStack');
     const selection = modeler.get('selection');
@@ -182,8 +181,9 @@ export class CmmnEditor extends CachedComponent {
       copy: false,
       cut: false,
       defaultCopyCutPaste: inputActive,
+      dirty,
       editLabel: !inputActive && !!selectionLength,
-      exportAs: [ 'svg', 'png' ],
+      exportAs: EXPORT_AS,
       find: !inputActive,
       globalConnectTool: !inputActive,
       handTool: !inputActive,
@@ -216,8 +216,20 @@ export class CmmnEditor extends CachedComponent {
     this.setState(newState);
   }
 
+  checkDirty() {
+    const {
+      modeler,
+      stackIdx
+    } = this.getCached();
+
+    const commandStack = modeler.get('commandStack');
+
+    return commandStack._stackIdx !== stackIdx;
+  }
+
   checkImport() {
     const {
+      lastXML,
       modeler
     } = this.getCached();
 
@@ -225,7 +237,7 @@ export class CmmnEditor extends CachedComponent {
       xml
     } = this.props;
 
-    if (xml !== modeler.lastXML) {
+    if (isXMLChange(lastXML, xml)) {
       this.setState({
         importing: true
       });
@@ -235,17 +247,39 @@ export class CmmnEditor extends CachedComponent {
     }
   }
 
-  getXML() {
+  /**
+   * @returns {CamundaCmmnModeler}
+   */
+  getModeler() {
     const {
       modeler
     } = this.getCached();
 
+    return modeler;
+  }
+
+  getXML() {
+    const {
+      lastXML,
+      modeler
+    } = this.getCached();
+
+    const commandStack = modeler.get('commandStack');
+
+    const stackIdx = commandStack._stackIdx;
+
     return new Promise((resolve, reject) => {
 
-      // TODO(nikku): set current modeler version and name to the diagram
+      if (!this.checkDirty()) {
+        return resolve(lastXML);
+      }
 
+      // TODO(nikku): set current modeler version and name to the diagram
       modeler.saveXML({ format: true }, (err, xml) => {
-        modeler.lastXML = xml;
+        this.setCached({
+          lastXML: xml,
+          stackIdx
+        });
 
         if (err) {
           this.handleError({
@@ -261,9 +295,7 @@ export class CmmnEditor extends CachedComponent {
   }
 
   exportAs(type) {
-    const {
-      modeler
-    } = this.getCached();
+    const modeler = this.getModeler();
 
     return new Promise((resolve, reject) => {
 
@@ -299,9 +331,7 @@ export class CmmnEditor extends CachedComponent {
   }
 
   triggerAction = (action, context) => {
-    const {
-      modeler
-    } = this.getCached();
+    const modeler = this.getModeler();
 
     if (action === 'resize') {
       return this.resize();
@@ -330,9 +360,7 @@ export class CmmnEditor extends CachedComponent {
   }
 
   resize = () => {
-    const {
-      modeler
-    } = this.getCached();
+    const modeler = this.getModeler();
 
     const canvas = modeler.get('canvas');
 
@@ -377,15 +405,34 @@ export class CmmnEditor extends CachedComponent {
       position: 'absolute'
     });
 
+    const commandStack = modeler.get('commandStack');
+
+    const stackIdx = commandStack._stackIdx;
+
     return {
-      modeler,
       __destroy: () => {
         modeler.destroy();
-      }
+      },
+      lastXML: null,
+      modeler,
+      stackIdx
     };
   }
 
 }
 
-
 export default WithCache(WithCachedState(CmmnEditor));
+
+// helpers //////////
+
+function isImporting(state) {
+  return state.importing;
+}
+
+function isXMLChange(prevXML, xml) {
+  return prevXML !== xml;
+}
+
+function isChachedStateChange(prevProps, props) {
+  return prevProps.cachedState !== props.cachedState;
+}
