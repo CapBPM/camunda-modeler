@@ -32,7 +32,11 @@ import css from './DmnEditor.less';
 
 import generateImage from '../../util/generateImage';
 
-import { assign } from 'min-dash';
+import {
+  assign
+} from 'min-dash';
+
+const EXPORT_AS = [ 'svg', 'png' ];
 
 
 export class DmnEditor extends CachedComponent {
@@ -49,9 +53,7 @@ export class DmnEditor extends CachedComponent {
   componentDidMount() {
     this._isMounted = true;
 
-    const {
-      modeler
-    } = this.getCached();
+    const modeler = this.getModeler();
 
     this.listen('on');
 
@@ -69,18 +71,25 @@ export class DmnEditor extends CachedComponent {
   componentWillUnmount() {
     this._isMounted = false;
 
-    const {
-      modeler
-    } = this.getCached();
+    const modeler = this.getModeler();
 
     this.listen('off');
 
     modeler.detach();
   }
 
-  componentDidUpdate() {
-    if (!this.state.importing) {
+  componentDidUpdate(prevProps) {
+    if (isImporting(this.state)) {
+      return;
+    }
+
+    if (isSheetChange(prevProps, this.props) ||
+        isXMLChange(prevProps.xml, this.props.xml)) {
       this.checkImport();
+    }
+
+    if (isChachedStateChange(prevProps, this.props)) {
+      this.handleChanged();
     }
   }
 
@@ -93,9 +102,7 @@ export class DmnEditor extends CachedComponent {
   }
 
   listen(fn) {
-    const {
-      modeler
-    } = this.getCached();
+    const modeler = this.getModeler();
 
     [
       'saveXML.done',
@@ -114,21 +121,13 @@ export class DmnEditor extends CachedComponent {
   }
 
   checkDirty = () => {
-    const {
-      modeler
+    let {
+      dirty,
+      modeler,
+      stackIdx
     } = this.getCached();
 
-    return modeler.getViews().reduce((dirty, view) => {
-      const viewer = modeler._getViewer(view);
-
-      const commandStack = viewer.get('commandStack', false);
-
-      if (!commandStack) {
-        return dirty;
-      }
-
-      return dirty || commandStack.canUndo();
-    }, false);
+    return dirty || modeler.getStackIdx() !== stackIdx;
   }
 
   viewContentChanged = () => {
@@ -136,21 +135,24 @@ export class DmnEditor extends CachedComponent {
   }
 
   handleImport = (error, warnings) => {
-
     const {
       activeSheet,
       onImport,
       xml
     } = this.props;
 
-    const {
-      modeler
-    } = this.getCached();
+    const modeler = this.getModeler();
+
+    const stackIdx = modeler.getStackIdx();
 
     onImport(error, warnings);
 
     if (!error) {
-      modeler.lastXML = xml;
+      this.setCached({
+        dirty: false,
+        lastXML: xml,
+        stackIdx
+      });
 
       this.setState({
         importing: false
@@ -168,14 +170,11 @@ export class DmnEditor extends CachedComponent {
   }
 
   viewsChanged = ({ activeView, views }) => {
-
     const {
       onSheetsChanged
     } = this.props;
 
-    const {
-      modeler
-    } = this.getCached();
+    const modeler = this.getModeler();
 
     let activeSheet;
 
@@ -204,7 +203,7 @@ export class DmnEditor extends CachedComponent {
       activeViewer.get('propertiesPanel').attachTo(this.propertiesPanelRef.current);
     }
 
-    // needs to be called last
+    // must be called last
     this.setCached({
       activeView,
       views
@@ -214,25 +213,19 @@ export class DmnEditor extends CachedComponent {
   }
 
   undo = () => {
-    const {
-      modeler
-    } = this.getCached();
+    const modeler = this.getModeler();
 
     modeler.getActiveViewer().get('commandStack').undo();
   }
 
   redo = () => {
-    const {
-      modeler
-    } = this.getCached();
+    const modeler = this.getModeler();
 
     modeler.getActiveViewer().get('commandStack').redo();
   }
 
-  handleChanged = (event) => {
-    const {
-      modeler
-    } = this.getCached();
+  handleChanged = () => {
+    const modeler = this.getModeler();
 
     const {
       onChanged
@@ -256,7 +249,7 @@ export class DmnEditor extends CachedComponent {
       copy: false,
       cut: false,
       dirty,
-      exportAs: 'saveSVG' in activeViewer ? [ 'svg', 'png' ] : false,
+      exportAs: 'saveSVG' in activeViewer ? EXPORT_AS : false,
       inputActive,
       paste: false,
       propertiesPanel: true,
@@ -332,6 +325,7 @@ export class DmnEditor extends CachedComponent {
 
   checkImport = () => {
     const {
+      lastXML,
       modeler
     } = this.getCached();
 
@@ -340,23 +334,23 @@ export class DmnEditor extends CachedComponent {
       xml
     } = this.props;
 
-    if (xml !== modeler.lastXML) {
+    if (isXMLChange(lastXML, xml)) {
       this.setState({
         importing: true
       });
 
-      modeler.importXML(xml, { open: false }, this.ifMounted(this.handleImport));
-    } else {
-      activeSheet
-        && activeSheet.element
-        && this.open(activeSheet.element);
+      modeler.importXML(xml, this.ifMounted(this.handleImport));
+    } else if (activeSheet && activeSheet.element) {
+      this.open(activeSheet.element);
     }
   }
 
   open = (element) => {
     const {
       activeView,
-      modeler
+      dirty,
+      modeler,
+      stackIdx
     } = this.getCached();
 
     let view = modeler.getView(element);
@@ -372,36 +366,58 @@ export class DmnEditor extends CachedComponent {
       return;
     }
 
-    if (!activeView
-      || activeView.element !== element) {
-
+    if (!activeView || activeView.element !== element) {
       this.setCached({
-        activeView: view
+        activeView: view,
+        dirty: dirty || this.getModeler().getStackIdx() !== stackIdx
       });
 
       modeler.open(view);
+
+      this.setCached({
+        stackIdx: this.getModeler().getStackIdx()
+      });
     }
   }
 
-  triggerAction = (action, options) => {
+  triggerAction = (action, context) => {
+    const modeler = this.getModeler();
+
+    modeler.getActiveViewer()
+      .get('editorActions')
+      .trigger(action, context);
+  }
+
+  /**
+   * @returns {CamundaDmnModeler}
+   */
+  getModeler() {
     const {
       modeler
     } = this.getCached();
 
-    modeler.getActiveViewer()
-      .get('editorActions')
-      .trigger(action);
+    return modeler;
   }
 
   getXML() {
     const {
+      lastXML,
       modeler
     } = this.getCached();
 
+    const stackIdx = modeler.getStackIdx();
+
     return new Promise((resolve, reject) => {
+      if (!this.checkDirty()) {
+        return resolve(lastXML);
+      }
 
       modeler.saveXML({ format: true }, (err, xml) => {
-        modeler.lastXML = xml;
+        this.setCached({
+          dirty: false,
+          lastXML: xml,
+          stackIdx
+        });
 
         if (err) {
           this.handleError({
@@ -417,9 +433,7 @@ export class DmnEditor extends CachedComponent {
   }
 
   exportAs(type) {
-    const {
-      modeler
-    } = this.getCached();
+    const modeler = this.getModeler();
 
     const viewer = modeler.getActiveViewer();
 
@@ -466,9 +480,7 @@ export class DmnEditor extends CachedComponent {
       importing,
     } = this.state;
 
-    const {
-      modeler
-    } = this.getCached();
+    const modeler = this.getModeler();
 
     const activeView = modeler.getActiveView();
 
@@ -504,11 +516,16 @@ export class DmnEditor extends CachedComponent {
   static createCachedState() {
     const modeler = new CamundaDmnModeler();
 
+    const stackIdx = modeler.getStackIdx();
+
     return {
-      modeler,
       __destroy: () => {
         modeler.destroy();
-      }
+      },
+      dirty: false,
+      lastXML: null,
+      modeler,
+      stackIdx
     };
   }
 
@@ -529,4 +546,20 @@ function getSheetName(view) {
   }
 
   return view.element.name || viewNames[view.type];
+}
+
+function isImporting(state) {
+  return state.importing;
+}
+
+function isSheetChange(prevProps, props) {
+  return prevProps.activeSheet.id !== props.activeSheet.id;
+}
+
+function isXMLChange(prevXML, xml) {
+  return prevXML !== xml;
+}
+
+function isChachedStateChange(prevProps, props) {
+  return prevProps.cachedState !== props.cachedState;
 }
