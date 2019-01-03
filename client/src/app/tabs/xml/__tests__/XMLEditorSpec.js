@@ -9,7 +9,7 @@ import {
 
 import { XMLEditor } from '../XMLEditor';
 
-import CodeMirror from 'test/mocks/codemirror/CodeMirror';
+import CodeMirror from 'test/mocks/code-mirror/CodeMirror';
 
 import { SlotFillRoot } from 'src/app/slot-fill';
 

@@ -120,7 +120,7 @@ module.exports = function(karma) {
           'bpmn-js/lib/Modeler': 'test/mocks/bpmn-js/Modeler',
           'cmmn-js/lib/Modeler': 'test/mocks/cmmn-js/Modeler',
           './DmnModeler': 'test/mocks/dmn-js/Modeler',
-          './CodeMirror': 'test/mocks/codemirror/Codemirror'
+          './CodeMirror': 'test/mocks/code-mirror/CodeMirror'
         }
       }
     }
