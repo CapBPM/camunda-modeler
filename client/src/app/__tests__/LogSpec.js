@@ -7,6 +7,9 @@ import {
 
 import Log from '../Log';
 
+import * as minDash from 'min-dash';
+
+
 /* global sinon */
 const { spy, fake } = sinon;
 
@@ -286,6 +289,50 @@ describe('<Log>', function() {
 
       // then
       expect(handleCopy).to.have.been.calledOnce;
+    });
+
+  });
+
+
+  describe('resize', function() {
+
+    beforeEach(function() {
+      // make throttle synchronous for easier testing
+      sinon.stub(minDash, 'throttle').callsFake(fn => fn());
+    });
+
+    afterEach(sinon.restore);
+
+
+    it('should handle resize', function() {
+      // given
+      const {
+        instance
+      } = createLog();
+
+      instance.originalHeight = 100;
+
+      // when
+      instance.handleResize(null, { y: -10 });
+
+      // then
+      expect(instance.state.height).to.eql(110);
+    });
+
+
+    it('should ignore delta y = 0', function() {
+      // given
+      const {
+        instance
+      } = createLog();
+
+      const originalState = instance.state;
+
+      // when
+      instance.handleResize(null, { y: 0 });
+
+      // then
+      expect(instance.state).to.eql(originalState);
     });
 
   });
